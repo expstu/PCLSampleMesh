@@ -59,7 +59,6 @@ inline void
 randPSurface(vtkPolyData * polydata, std::vector<double> * cumulativeAreas, double totalArea,
 	Eigen::Vector4f& p, bool calcNormal, Eigen::Vector3f& n)
 {
-	//float r = static_cast<double> (uniform_deviate(rand()) * totalArea);
 	double r = u01() * totalArea;
 
 	std::vector<double>::iterator low = std::lower_bound(cumulativeAreas->begin(), cumulativeAreas->end(), r);
@@ -104,31 +103,6 @@ uniform_sampling(vtkSmartPointer<vtkPolyData> polydata, size_t n_samples, bool c
 		polydata->GetPoint(ptIds[2], p3);
 		totalArea += vtkTriangle::TriangleArea(p1, p2, p3);
 		cumulativeAreas[i] = totalArea;
-		/*
-		// every triangle should have at least 3 sample points
-		Eigen::Vector4f p;
-		Eigen::Vector3f n;
-		pcl::PointNormal pclP;
-		for (int i = 0; i < 3; i++) {
-		randomPointTriangle(float(p1[0]), float(p1[1]), float(p1[2]),
-		float(p2[0]), float(p2[1]), float(p2[2]),
-		float(p3[0]), float(p3[1]), float(p3[2]), p);
-		pclP.x = p[0];
-		pclP.y = p[1];
-		pclP.z = p[2];
-		if (calc_normal)
-		{
-		// OBJ: Vertices are stored in a counter-clockwise order by default
-		Eigen::Vector3f v1 = Eigen::Vector3f(p1[0], p1[1], p1[2]) - Eigen::Vector3f(p3[0], p3[1], p3[2]);
-		Eigen::Vector3f v2 = Eigen::Vector3f(p2[0], p2[1], p2[2]) - Eigen::Vector3f(p3[0], p3[1], p3[2]);
-		n = v1.cross(v2);
-		n.normalize();
-		pclP.normal_x = n[0];
-		pclP.normal_y = n[1];
-		pclP.normal_z = n[2];
-		}
-		cloud_out.points.push_back(pclP);
-		}*/
 	}
 
 	cloud_out.points.resize(n_samples);
@@ -203,30 +177,19 @@ int main(int argc, char** argv) {
 	triangleMapper->Update();
 	polydata1 = triangleMapper->GetInput();
 
+	// Sampling
 	time.tic();
 	int SAMPLE_POINTS_ = 10000000;
 	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_1(new pcl::PointCloud<pcl::PointNormal>);
 	uniform_sampling(polydata1, SAMPLE_POINTS_, true, *cloud_1);
 	std::cout << "Sampled cloud size:" << cloud_1->size() << " " << time.toc() / 1000. << "s" << std::endl;
 
-	/*
-	// Voxelgrid
-	pcl::VoxelGrid<pcl::PointNormal> grid_;
-	grid_.setInputCloud(cloud_1);
-	float leaf_size = 1.f;
-	grid_.setLeafSize(leaf_size, leaf_size, leaf_size);
-
-	time.tic();
-	pcl::PointCloud<pcl::PointNormal>::Ptr voxel_cloud(new pcl::PointCloud<pcl::PointNormal>);
-	grid_.filter(*voxel_cloud);
-	std::cout << voxel_cloud->size() << std::endl;
-	std::cout << "Filtered cloud size: " << time.toc() / 1000. << "s" << std::endl;*/
-
 	//////////////////////////////////////////////////////////////////////////
 	// show
+/*
 	viewer = new pcl::visualization::PCLVisualizer(argc, argv, "Sample mesh test");
 
-	//viewer->addPolygonMesh(polygonMesh, "mesh");
+	viewer->addPolygonMesh(polygonMesh, "mesh");
 	//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler(meshCloud, 0, 255, 0);
 	//viewer->addPointCloud(meshCloud, handler2, "mesh_cloud");
 
@@ -235,10 +198,6 @@ int main(int argc, char** argv) {
 	//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal> handler2(cloud_1, 255, 255, 0);
 	//viewer->addPointCloud<pcl::PointNormal>(cloud_1, handler2, "cloud1");
 	//viewer->addPointCloudNormals<pcl::PointNormal>(cloud_1, 1, 0.02f, "cloud_normals");
-
-	//viewer->addPointCloud<pcl::PointNormal>(voxel_cloud);
-	//viewer->addPointCloudNormals<pcl::PointNormal>(voxel_cloud, 1, 0.02f, "cloud_normals");
-	//viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_COLOR, 1.0, 0.0, 0.0, "cloud");
 
 	// bounding box
 	//viewer->addCube(minP2.x, maxP2.x, minP2.y, maxP2.y, minP2.z, maxP2.z, 1.0, 0.0, 0.0, "meshAABB");
@@ -254,7 +213,7 @@ int main(int argc, char** argv) {
 	while (!viewer->wasStopped()) {
 		viewer->spinOnce(100);
 		boost::this_thread::sleep(boost::posix_time::microseconds(100000));
-	}
+	}*/
 
 	pcl::io::savePCDFileBinary("model_cloud.pcl", *cloud_1);
 
