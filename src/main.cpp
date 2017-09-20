@@ -10,6 +10,7 @@
 #include <pcl/octree/octree_pointcloud.h>
 #include <pcl/PolygonMesh.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/passthrough.h>
 
 #include <Eigen/Geometry>
 
@@ -139,27 +140,29 @@ void getAABB(pcl::PointCloud<PointType>& cloud, PointType& minP, PointType& maxP
 	}
 }
 
+const float baseHeight = 15;
+const float sensorWidth = 11.264f;
+
 int main(int argc, char** argv) {
 	pcl::console::TicToc time;
 
 	//////////////////////////////////////////////////////////////////////////
-	// load model
+	// Load model
 	time.tic();
 	pcl::PolygonMesh polygonMesh;
-	pcl::io::loadPolygonFileSTL("cp2017.STL", polygonMesh);
+	pcl::io::loadPolygonFileSTL("model.STL", polygonMesh);
 	std::cout << time.toc() / 1000.0 << 's' << std::endl;
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr meshCloud(new pcl::PointCloud<pcl::PointXYZ>);
 	fromPCLPointCloud2(polygonMesh.cloud, *meshCloud);
 	std::cout << "Mesh points: " << meshCloud->size() << std::endl;
 
+	// Transform
 	time.tic();
 	pcl::PointXYZ minP2, maxP2;
 	getAABB(*meshCloud, minP2, maxP2);
-	// transform
 	Eigen::Affine3f a;
-	a = Eigen::AngleAxisf(180 * static_cast<float>(M_PI) / 180, Eigen::Vector3f::UnitY())*
-		Eigen::Translation3f(-(minP2.x + maxP2.x) / 2, -(minP2.y + maxP2.y) / 2, -maxP2.z);
+	a = Eigen::Translation3f(-(minP2.x + maxP2.x) / 2, -(minP2.y + maxP2.y) / 2, baseHeight);
 	pcl::transformPointCloud(*meshCloud, *meshCloud, a);
 	toPCLPointCloud2(*meshCloud, polygonMesh.cloud);
 	getAABB(*meshCloud, minP2, maxP2);
@@ -180,24 +183,84 @@ int main(int argc, char** argv) {
 	// Sampling
 	time.tic();
 	int SAMPLE_POINTS_ = 10000000;
-	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_1(new pcl::PointCloud<pcl::PointNormal>);
-	uniform_sampling(polydata1, SAMPLE_POINTS_, true, *cloud_1);
-	std::cout << "Sampled cloud size:" << cloud_1->size() << " " << time.toc() / 1000. << "s" << std::endl;
+	pcl::PointCloud<pcl::PointNormal>::Ptr sampledCloud(new pcl::PointCloud<pcl::PointNormal>);
+	uniform_sampling(polydata1, SAMPLE_POINTS_, true,*sampledCloud);
+	std::cout << "Sampled cloud size:" << sampledCloud->size() << " " << time.toc() / 1000. << "s" << std::endl;
+
+	// Get top layer
+	time.tic();
+	pcl::PointCloud<pcl::PointNormal>::Ptr topSampledCloud(new pcl::PointCloud<pcl::PointNormal>);
+	for (int i = 0; i < sampledCloud->size() ; i++) {
+		if (sampledCloud->points[i].normal_z >= 0) {
+			topSampledCloud->push_back(sampledCloud->points[i]);
+		}
+	}
+	std::cout << "Cut cloud size:" << topSampledCloud->size() << " " << time.toc() / 1000. << "s" << std::endl;
+
+	// Clip model
+	time.tic();
+	pcl::PointNormal minP, maxP;
+	getAABB(*topSampledCloud, minP, maxP);
+
+	pcl::PointCloud<pcl::PointNormal>::Ptr modelCloudClipped(new pcl::PointCloud<pcl::PointNormal>);
+	pcl::PointCloud<pcl::PointNormal>::Ptr tempCloud(new pcl::PointCloud<pcl::PointNormal>);
+
+	std::cout << "clipper " << std::endl;
+	pcl::PassThrough<pcl::PointNormal> clipper;
+	clipper.setInputCloud(topSampledCloud);
+	clipper.setFilterFieldName("x");
+	clipper.setFilterLimits(minP.x + sensorWidth, maxP.x - sensorWidth);
+	clipper.setFilterLimitsNegative(true);
+	clipper.filter(*tempCloud);
+
+	clipper.setFilterLimitsNegative(false);
+	clipper.filter(*modelCloudClipped);
+
+	clipper.setInputCloud(modelCloudClipped);
+	clipper.setFilterFieldName("y");
+	clipper.setFilterLimits(minP.y + sensorWidth, maxP.y - sensorWidth);
+	clipper.setFilterLimitsNegative(true);
+	clipper.filter(*modelCloudClipped);
+
+	*modelCloudClipped += *tempCloud;
+	std::cout << time.toc() / 1000.0 << 's' << std::endl;
+	std::cout << "Clipped cloud size: " << modelCloudClipped->size() << std::endl;
+
+	// Down sample
+	time.tic();
+	std::cout << "Filter in: ";
+	pcl::PointCloud<pcl::PointNormal>::Ptr modelCloudFiltered(new pcl::PointCloud<pcl::PointNormal>);
+	pcl::VoxelGrid<pcl::PointNormal> sor;
+	sor.setInputCloud(modelCloudClipped);
+	sor.setLeafSize(0.1f, 0.1f, 0.03f);
+	sor.filter(*modelCloudFiltered);
+	std::cout << time.toc() / 1000.0 << 's' << std::endl;
+	std::cout << "Filtered cloud size: " << modelCloudFiltered->size() << std::endl;
+
+	// Output
+	pcl::io::savePCDFileBinary("model_cloud.pcd", *modelCloudClipped);
+	pcl::io::savePCDFileBinary("model_cloud_filtered.pcd", *modelCloudFiltered);
 
 	//////////////////////////////////////////////////////////////////////////
 	// show
+
 /*
 	viewer = new pcl::visualization::PCLVisualizer(argc, argv, "Sample mesh test");
 
-	viewer->addPolygonMesh(polygonMesh, "mesh");
+	//viewer->addPolygonMesh(polygonMesh, "mesh");
 	//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> handler(meshCloud, 0, 255, 0);
 	//viewer->addPointCloud(meshCloud, handler2, "mesh_cloud");
 
 	//viewer->addModelFromPolyData(polydata1, "mesh1");
 
-	//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal> handler2(cloud_1, 255, 255, 0);
-	//viewer->addPointCloud<pcl::PointNormal>(cloud_1, handler2, "cloud1");
+	//pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal> handler1(cloud_1, 255, 255, 0);
+	//viewer->addPointCloud<pcl::PointNormal>(cloud_1, handler1, "cloud1");
 	//viewer->addPointCloudNormals<pcl::PointNormal>(cloud_1, 1, 0.02f, "cloud_normals");
+
+
+	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointNormal> handler2(modelCloudFiltered, 0, 0, 255);
+	viewer->addPointCloud<pcl::PointNormal>(modelCloudFiltered, handler2, "cloud2");
+	viewer->addPointCloudNormals<pcl::PointNormal>(modelCloudFiltered, 1, 0.03f, "cloud_2_normals");
 
 	// bounding box
 	//viewer->addCube(minP2.x, maxP2.x, minP2.y, maxP2.y, minP2.z, maxP2.z, 1.0, 0.0, 0.0, "meshAABB");
@@ -214,8 +277,6 @@ int main(int argc, char** argv) {
 		viewer->spinOnce(100);
 		boost::this_thread::sleep(boost::posix_time::microseconds(100000));
 	}*/
-
-	pcl::io::savePCDFileBinary("model_cloud.pcl", *cloud_1);
 
 	return 0;
 }

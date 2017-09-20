@@ -3,6 +3,7 @@ project(PCL_SAMPLE_MESH)
 
 add_executable( pcl_sample_mesh src/main.cpp)
 set_property( DIRECTORY PROPERTY VS_STARTUP_PROJECT "pcl_sample_mesh" )
+add_definitions(-DUNICODE -D_UNICODE)
 
 # Find Packages
 find_package( PCL 1.8 REQUIRED )
